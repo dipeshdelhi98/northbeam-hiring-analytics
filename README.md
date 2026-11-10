@@ -15,11 +15,26 @@ Requires Python 3.12. Windows paths shown; on macOS/Linux use `.venv/bin/`.
 py -3.12 -m venv .venv            # or: python3.12 -m venv .venv
 .venv/Scripts/pip install -r requirements.txt
 .venv/Scripts/python -m pipeline.run     # builds warehouse/northbeam.duckdb (~4 s)
-.venv/Scripts/python -m pytest -q        # 28 tests: controls, idempotency, access, guards
+.venv/Scripts/python -m pytest -q        # 29 tests: controls, idempotency, access, guards
 .venv/Scripts/uvicorn api.main:app       # http://127.0.0.1:8000
 ```
 
-Sign in with any email from `data/landing/users.json`; demo password **`northbeam-demo`**
+**The full UI (Next.js)** — optional, needs Node 20+:
+
+```bash
+cd frontend && npm install && npm run build && cd ..   # static export → frontend/out
+.venv/Scripts/uvicorn api.main:app                    # now serves the Next.js app at /
+# or, while developing the UI: (cd frontend && npm run dev) → http://localhost:3000
+```
+
+Without the build, `/` serves a single-file fallback page from `web/` over the same API.
+The Next.js app has three sections: **Overview** (headline metrics, hires by month, stage
+funnel, pipeline on any date), **Requisitions** (filter/search; open a role to see its candidates
+and each one's stage history), **Team** (per-recruiter / hiring-manager results). Light and dark
+themes, and it works at phone width.
+
+Sign in with any email from `data/landing/users.json` (the login page has one-click demo
+accounts); demo password **`northbeam-demo`**
 (override with `NB_DEMO_PASSWORD`). Useful logins:
 
 | Email | Role | Sees |
@@ -40,7 +55,8 @@ API docs: http://127.0.0.1:8000/api/docs
 | `metrics/definitions.py` | **Every metric, once.** Change time-to-hire here and nowhere else. |
 | `api/scope.py` | Row-level security. |
 | `api/main.py`, `api/auth.py` | Endpoints, JWT auth. |
-| `web/index.html` | The frontend. Renders API strings; no arithmetic. |
+| `frontend/` | Next.js app (static export served by FastAPI). Renders API values; no arithmetic. |
+| `web/index.html` | Zero-build fallback page, served when `frontend/out` doesn't exist. |
 | `docs/` | Reconciliation, deployment, worklog, estimates, plans given to the agent. |
 | `CLAUDE.md` | Context file for the coding agent (Claude Code). |
 
@@ -78,13 +94,18 @@ bridge_candidate_record│
 
 `metrics/definitions.py` holds: candidate pool, applications in stage as-of, hires, **median time
 to hire**, offered salary, **offer acceptance rate**, **stage conversion**, pipeline by requisition,
+hires by month, team performance (per recruiter / hiring manager),
 and a generic **period-over-period** (calendar-aligned: Q2 compares with Q1) over any metric that
 takes a date window.
 
 How "defined once" is enforced, not just intended (`tests/test_single_definition.py`):
 - metric-shaped SQL (`median(`, `date_diff(`, `sum(`, `'accepted'` …) anywhere outside
   `metrics/` fails the build;
-- the frontend may not use `Math.`, `toFixed`, `parseFloat` or a metric's raw `value` on cards;
+- neither frontend may use `Math.`, `toFixed`, `parseFloat`, `.reduce(`, `Intl.NumberFormat`…
+  — the API sends display strings (including period-over-period direction and whether the change
+  is favourable), so the UI never decides anything numeric;
+- shared formula fragments (`TIME_TO_HIRE_DAYS`, `ACCEPTANCE_RATE_PCT`) are reused by the
+  per-person and per-month metrics, so changing time to hire is a one-line edit everywhere;
 - metric SQL may only use bare table names, so it can only ever run against a scoped connection.
 
 ## Access control — and how I satisfied myself it can't be bypassed

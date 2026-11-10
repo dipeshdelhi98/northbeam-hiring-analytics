@@ -22,9 +22,12 @@ ALLOWED = {
 }
 
 
+SKIP_DIRS = {".venv", "tests", "node_modules", ".next", "out", ".git"}
+
+
 def _code_files():
     for p in ROOT.rglob("*"):
-        if p.suffix in {".py", ".html", ".js", ".sql"} and ".venv" not in p.parts and "tests" not in p.parts:
+        if p.suffix in {".py", ".html", ".js", ".sql", ".ts", ".tsx"} and not SKIP_DIRS & set(p.parts):
             yield p
 
 
@@ -56,3 +59,15 @@ def test_frontend_does_no_arithmetic_on_values():
     assert "Math." not in script and "toFixed" not in script and "parseFloat" not in script
     # numbers on cards are only ever the API's display strings
     assert ".value)" not in script and "c.value" not in script
+
+
+def test_next_frontend_does_no_arithmetic_on_values():
+    """The React app may filter, sort and lay out rows, but never derive or reformat a number:
+    no maths library, no numeric parsing, no aggregation, no locale number formatting."""
+    forbidden = [r"\bMath\.", r"toFixed", r"parseFloat", r"parseInt", r"\bNumber\(", r"\.reduce\(",
+                 r"Intl\.NumberFormat", r"toLocaleString", r"toPrecision"]
+    offenders = []
+    for p in (ROOT / "frontend" / "src").rglob("*.ts*"):
+        text = p.read_text(encoding="utf-8")
+        offenders += [f"{p.relative_to(ROOT)}: {pat}" for pat in forbidden if re.search(pat, text)]
+    assert not offenders, offenders

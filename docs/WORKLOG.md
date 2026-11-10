@@ -76,6 +76,11 @@ called done.
 | 11 | Tests passed first time → distrusted | 28/28 green on first run. Mutation-checked: widen HM scope to `TRUE` (4 access tests fail), fractional-day time-to-hire (control 3 fails at 58.5), a `median()` added to `api/main.py` (guard fails). |
 | 12 | **Agent error** — numbers in prose | The first draft of RECONCILIATION.md said "27 pairs share an email" and "13 names" from memory of earlier output. Re-queried before committing: actually 24 email groups / 51 records (up to 4 per email), 20 whitespace-flagged names. Corrected. Also corrected warehouse size claim in DEPLOYMENT (said ~3 MB; actual 7 MB). |
 | 13 | Deployment | Decided not to publish a public URL (PII-shaped data, shared demo password). Dockerfile written; **not built** — Docker not installed on this machine, stated as such in DEPLOYMENT.md. |
+| 14 | Second prompt: "make a very good UI … use Next or React" | Built a Next.js 16 app (Overview / Requisitions / Team). New numbers the UI needed (per-person results, hires by month, PoP direction + favourable, month labels, change text) were added to the **metric layer first**, then rendered. Time-to-hire and acceptance-rate formulas became shared fragments so the per-person metrics reuse rather than copy them. |
+| 15 | **Agent error** — Tailwind silently not compiled | Rewriting `next.config.ts` for static export dropped the scaffold's Turbopack Tailwind loader. Build still "succeeded"; caught from the `Unknown at rule @theme` warning, then confirmed by grepping the built CSS for a utility class. |
+| 16 | **Agent error** — PoP delta parsed from a display string | First draft split the API's `display` on `" vs "` to get the delta text. Replaced by a separate `change_display` field from the metric layer. |
+| 17 | Looked at it in a browser (Playwright driving local Edge, light/dark/phone) | Found a 477px-wide page on a 390px phone (grid tracks sized by table content) and 404s on Next 16 segment-prefetch files — the second only on Windows, because Starlette normalises paths with `\`. Both fixed; re-run shows 0 console errors and no horizontal scroll. |
+| 18 | Guard extended to `frontend/src` | Forbids `Math.`, `parseFloat`, `.reduce(`, `Intl.NumberFormat` etc. Mutation-checked by appending a `Math.round` percentage helper → test red. |
 
 ### Prompting changes that came out of the errors
 

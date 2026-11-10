@@ -10,7 +10,8 @@ This file is the standing brief for any coding agent working here. Read it befor
    If you find yourself writing `median(`, `count(distinct`, a ratio, or a date difference outside
    `metrics/`, stop — it belongs in a metric definition.
 2. **The frontend does no arithmetic on metric values.** The API returns a pre-formatted `display`
-   string; `web/` renders it verbatim.
+   string; `frontend/` and `web/` render it verbatim. If the UI needs a new number (a label, a
+   delta, a direction), add it to the metric layer's output — never compute it in TypeScript.
 3. **Stage is history, not a column.** Any "what stage was X in at time T" question is answered from
    `gold.fact_application_stage_history` (valid_from / valid_to). `applications.current_stage` is a
    stale denormalised column — it is kept in Gold only as `reported_current_stage` for auditing,
@@ -49,7 +50,9 @@ This file is the standing brief for any coding agent working here. Read it befor
 pipeline/   bronze.py silver.py gold.py run.py   (python -m pipeline.run)
 metrics/    definitions.py  ← the only place metrics live
 api/        main.py auth.py scope.py
-web/        index.html (static, served by the API)
+frontend/   Next.js 16 app (static export → frontend/out, served by the API). Read
+            frontend/AGENTS.md first: this Next version differs from training data.
+web/        index.html (zero-build fallback, served when frontend/out is absent)
 tests/      controls, idempotency, access control, single-definition guard
 docs/       RECONCILIATION.md, WORKLOG.md, ESTIMATES.md, DEPLOYMENT.md, plans/
 ```
