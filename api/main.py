@@ -12,6 +12,7 @@ from typing import Iterator
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from api.auth import authenticate, current_user_id, issue_token
@@ -76,7 +77,18 @@ def dashboard(s: Scoped = Depends(scoped)):
         "period_over_period": period_over_period(s.con, *DASHBOARD_POP),
         "stage_conversion": compute(s.con, "stage_conversion").to_dict(),
         "pipeline_by_requisition": compute(s.con, "pipeline_by_requisition").to_dict(),
+        "hires_by_month": compute(s.con, "hires_by_month").to_dict(),
     }
+
+
+@app.get("/api/team")
+def team(s: Scoped = Depends(scoped)):
+    """Per-user performance over the caller's scope. Non-admins only see colleagues who share
+    at least one of their requisitions (dim_user is unscoped, so filter rows that are all-zero)."""
+    rows = compute(s.con, "team_performance").value
+    if s.principal.role != "admin":
+        rows = [r for r in rows if r["requisitions"]]
+    return rows
 
 
 @app.get("/api/metrics")
@@ -169,6 +181,30 @@ def application_history(application_id: str, s: Scoped = Depends(scoped)):
     return [{"stage": r[0], "from": str(r[1]), "to": None if r[2] is None else str(r[2])} for r in rows]
 
 
-@app.get("/")
-def index():
-    return FileResponse(WEB_DIR / "index.html")
+NEXT_OUT = Path(__file__).resolve().parent.parent / "frontend" / "out"
+
+
+class NextExportFiles(StaticFiles):
+    """Static files for a Next.js export. Next 16 writes segment-prefetch payloads as nested
+    files (`__next.<id>/team/__PAGE__.txt`) but the client requests the dotted form
+    (`__next.<id>.team.__PAGE__.txt`); map one to the other instead of returning 404."""
+
+    async def get_response(self, path: str, scope):
+        head, _, name = path.replace("\\", "/").rpartition("/")  # Starlette uses os.sep
+        if name.startswith("__next.") and name.endswith(".txt") and name.count(".") > 2:
+            parts = name[: -len(".txt")].split(".")
+            nested = ".".join(parts[:2]) + "/" + "/".join(parts[2:]) + ".txt"
+            candidate = f"{head}/{nested}" if head else nested
+            if (Path(self.directory) / candidate).is_file():
+                path = candidate
+        return await super().get_response(path, scope)
+
+
+if (NEXT_OUT / "index.html").exists():
+    # Built Next.js app (cd frontend && npm run build). Mounted last so /api/* wins.
+    app.mount("/", NextExportFiles(directory=NEXT_OUT, html=True), name="frontend")
+else:
+    # Zero-build fallback: a single static page, so the API is usable without Node.
+    @app.get("/")
+    def index():
+        return FileResponse(WEB_DIR / "index.html")

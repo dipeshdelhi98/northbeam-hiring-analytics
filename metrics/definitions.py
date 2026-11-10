@@ -22,6 +22,16 @@ import duckdb
 STAGES = ("Applied", "Screen", "Interview", "Offer", "Hired", "Rejected", "Withdrawn")
 FUNNEL = ("Applied", "Screen", "Interview", "Offer", "Hired")
 
+# Shared formula fragments. A metric that needs one of these uses the fragment, never a copy,
+# so changing e.g. the time-to-hire definition is a one-line change that every metric follows.
+# Whole calendar days from application date to hire date (not elapsed 24h periods).
+TIME_TO_HIRE_DAYS = "date_diff('day', CAST(applied_at AS DATE), CAST(hired_at AS DATE))"
+# Accepted ÷ decided; open offers have not reached a decision. Expects a `status` column.
+ACCEPTANCE_RATE_PCT = (
+    "100.0 * count(*) FILTER (WHERE status = 'accepted')"
+    " / nullif(count(*) FILTER (WHERE status IN ('accepted', 'declined')), 0)"
+)
+
 
 @dataclass(frozen=True)
 class Metric:
@@ -34,6 +44,7 @@ class Metric:
     # optional post-processing of the fetched rows into the value (kept beside the SQL)
     shape: Callable[[list[tuple]], Any] | None = None
     supports_period: bool = False  # True if the metric takes start/end and can do PoP
+    higher_is_better: bool | None = None  # drives whether a PoP change is favourable
 
 
 @dataclass
@@ -92,6 +103,7 @@ _DEFS = [
         """,
         defaults={"start": "2026-01-01", "end": "2026-06-30"},
         supports_period=True,
+        higher_is_better=True,
     ),
     Metric(
         name="time_to_hire_median_days",
@@ -99,14 +111,15 @@ _DEFS = [
         description="Median of whole calendar days from application date to Hired date, for "
         "hires dated in [$start, $end]. Calendar-day difference, not elapsed 24h periods.",
         unit="days",
-        sql="""
-            SELECT median(date_diff('day', CAST(applied_at AS DATE), CAST(hired_at AS DATE)))
+        sql=f"""
+            SELECT median({TIME_TO_HIRE_DAYS})
             FROM fact_application
             WHERE is_valid_requisition AND hired_at IS NOT NULL
               AND CAST(hired_at AS DATE) BETWEEN CAST($start AS DATE) AND CAST($end AS DATE)
         """,
         defaults={"start": "2026-01-01", "end": "2026-06-30"},
         supports_period=True,
+        higher_is_better=False,
     ),
     Metric(
         name="offered_salary_total_inr",
@@ -129,9 +142,8 @@ _DEFS = [
         description="Accepted ÷ (accepted + declined). Open offers have not reached a decision "
         "and are excluded. Optional window on offer date [$start, $end].",
         unit="percent",
-        sql="""
-            SELECT 100.0 * count(*) FILTER (WHERE status = 'accepted')
-                   / nullif(count(*) FILTER (WHERE status IN ('accepted', 'declined')), 0)
+        sql=f"""
+            SELECT {ACCEPTANCE_RATE_PCT}
             FROM fact_offer
             WHERE is_valid_requisition
               AND ($start IS NULL OR offered_at >= CAST($start AS DATE))
@@ -139,6 +151,7 @@ _DEFS = [
         """,
         defaults={"start": None, "end": None},
         supports_period=True,
+        higher_is_better=True,
     ),
     Metric(
         name="stage_conversion",
@@ -184,6 +197,7 @@ _DEFS = [
         unit="table",
         sql="""
             SELECT r.req_id, r.title, r.department, r.status,
+                   r.location, hm.name AS hiring_manager, rc.name AS recruiter, r.headcount,
                    count(a.application_sk) AS applications,
                    count(*) FILTER (WHERE s.stage_name IN ('Applied','Screen','Interview','Offer'))
                        AS in_progress,
@@ -192,13 +206,100 @@ _DEFS = [
             FROM dim_requisition r
             LEFT JOIN fact_application a USING (requisition_sk)
             LEFT JOIN dim_stage s ON s.stage_sk = a.current_stage_sk
+            LEFT JOIN dim_user hm ON hm.user_sk = r.hiring_manager_user_sk
+            LEFT JOIN dim_user rc ON rc.user_sk = r.recruiter_user_sk
             WHERE r.is_valid
             GROUP BY ALL
             ORDER BY r.req_id
         """,
         shape=lambda rows: [
-            dict(zip(("req_id", "title", "department", "status", "applications",
-                      "in_progress", "at_offer", "hired"), r))
+            dict(zip(("req_id", "title", "department", "status", "location", "hiring_manager",
+                      "recruiter", "headcount", "applications", "in_progress", "at_offer",
+                      "hired"), r))
+            for r in rows
+        ],
+    ),
+    Metric(
+        name="hires_by_month",
+        label="Hires by month",
+        description="Hires per calendar month of hire date, with that month's median time to "
+        "hire. Months with no hires are shown as zero.",
+        unit="table",
+        sql=f"""
+            WITH months AS (
+                SELECT DISTINCT year_month FROM dim_date
+                WHERE date BETWEEN (SELECT min(CAST(hired_at AS DATE)) FROM fact_application)
+                               AND (SELECT max(CAST(hired_at AS DATE)) FROM fact_application)
+            ),
+            h AS (
+                SELECT strftime(hired_at, '%Y-%m') AS year_month,
+                       count(*) AS hires,
+                       median({TIME_TO_HIRE_DAYS}) AS median_days
+                FROM fact_application
+                WHERE is_valid_requisition AND hired_at IS NOT NULL
+                GROUP BY 1
+            )
+            SELECT m.year_month, coalesce(h.hires, 0), h.median_days
+            FROM months m LEFT JOIN h USING (year_month)
+            ORDER BY 1
+        """,
+        shape=lambda rows: [
+            {"month": r[0], "month_label": date.fromisoformat(r[0] + "-01").strftime("%b %y"),
+             "hires": r[1],
+             "median_days": None if r[2] is None else round(r[2], 1),
+             "median_days_display": "–" if r[2] is None else f"{r[2]:g} days"}
+            for r in rows
+        ],
+    ),
+    Metric(
+        name="team_performance",
+        label="Team performance",
+        description="Per recruiter / hiring manager, over the requisitions they own: "
+        "requisitions, applications, in progress now, hires, median time to hire (all hires), "
+        "and offer acceptance rate. Built from the same fragments as the headline metrics.",
+        unit="table",
+        sql=f"""
+            WITH owner AS (
+                SELECT requisition_sk, recruiter_user_sk AS user_sk FROM dim_requisition WHERE is_valid
+                UNION
+                SELECT requisition_sk, hiring_manager_user_sk FROM dim_requisition WHERE is_valid
+            ),
+            apps AS (
+                SELECT o.user_sk,
+                       count(DISTINCT o.requisition_sk) AS requisitions,
+                       count(a.application_sk) AS applications,
+                       count(*) FILTER (WHERE s.stage_name IN ('Applied','Screen','Interview','Offer'))
+                           AS in_progress,
+                       count(a.hired_at) AS hires,
+                       median({TIME_TO_HIRE_DAYS}) AS median_days
+                FROM owner o
+                LEFT JOIN fact_application a USING (requisition_sk)
+                LEFT JOIN dim_stage s ON s.stage_sk = a.current_stage_sk
+                GROUP BY 1
+            ),
+            offers AS (
+                SELECT o.user_sk, {ACCEPTANCE_RATE_PCT} AS acceptance_pct
+                FROM owner o JOIN fact_offer f USING (requisition_sk)
+                WHERE f.is_valid_requisition
+                GROUP BY 1
+            )
+            SELECT u.user_id, u.name, u.role, u.department,
+                   coalesce(a.requisitions, 0), coalesce(a.applications, 0),
+                   coalesce(a.in_progress, 0), coalesce(a.hires, 0),
+                   a.median_days, f.acceptance_pct
+            FROM dim_user u
+            LEFT JOIN apps a USING (user_sk)
+            LEFT JOIN offers f USING (user_sk)
+            ORDER BY CASE u.role WHEN 'recruiter' THEN 1 WHEN 'hiring_manager' THEN 2 ELSE 3 END,
+                     u.name
+        """,
+        shape=lambda rows: [
+            {"user_id": r[0], "name": r[1], "role": r[2], "department": r[3],
+             "requisitions": r[4], "applications": r[5], "in_progress": r[6], "hires": r[7],
+             "median_days": None if r[8] is None else round(r[8], 1),
+             "median_days_display": "–" if r[8] is None else f"{r[8]:g} days",
+             "acceptance_pct": None if r[9] is None else round(r[9], 1),
+             "acceptance_display": "–" if r[9] is None else f"{r[9]:.1f}%"}
             for r in rows
         ],
     ),
@@ -287,7 +388,18 @@ def period_over_period(
     prev = compute(con, name, start=ps.isoformat(), end=pe.isoformat())
     change = None if cur.value is None or prev.value is None else cur.value - prev.value
     change_pct = None if change is None or not prev.value else 100.0 * change / prev.value
-    delta_unit = "pp" if m.unit == "percent" else ("days" if m.unit == "days" else "")
+    direction = None if change is None else ("up" if change > 0 else "down" if change < 0 else "flat")
+    favourable = (
+        None if direction in (None, "flat") or m.higher_is_better is None
+        else (direction == "up") == m.higher_is_better
+    )
+    delta_unit = "pp" if m.unit == "percent" else (
+        ("day" if change is not None and abs(change) == 1 else "days") if m.unit == "days" else ""
+    )
+    change_display = "–" if change is None else (
+        f"{change:+g}{(' ' + delta_unit) if delta_unit else ''}"
+        + ("" if change_pct is None else f" ({change_pct:+.1f}%)")
+    )
     return {
         "name": name,
         "label": f"{m.label} — period over period",
@@ -295,8 +407,9 @@ def period_over_period(
         "previous": prev.to_dict(),
         "change": None if change is None else round(change, 1),
         "change_pct": None if change_pct is None else round(change_pct, 1),
-        "display": "–" if change is None else
-        f"{change:+g}{(' ' + delta_unit) if delta_unit else ''}"
-        + ("" if change_pct is None else f" ({change_pct:+.1f}%)")
-        + f" vs {ps.isoformat()} → {pe.isoformat()}",
+        "direction": direction,
+        "favourable": favourable,
+        "previous_window": f"{ps.isoformat()} → {pe.isoformat()}",
+        "change_display": change_display,
+        "display": change_display if change is None else f"{change_display} vs {ps.isoformat()} → {pe.isoformat()}",
     }
