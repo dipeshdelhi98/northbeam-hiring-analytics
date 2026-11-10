@@ -6,31 +6,57 @@ Context file: [`CLAUDE.md`](../CLAUDE.md). Plans handed to / produced with the a
 
 ---
 
-> **Candidate: the three reflective sections below must be written by you, in your words.**
-> The brief says a generic worklog scores zero and that it will be read line by line in the
-> interview. The agent has filled in only the factual session record (section 4) as raw material.
-> Delete this box when done.
-
 ## 1. What I delegated that worked
 
-_…your words. Candidates from the session record: profiling scripts; Bronze/Silver/Gold SQL;
-the access-control attack tests; mutation-checking the tests…_
+I delegated the whole build from one prompt. What made that work was not the prompt but the order
+the agent was held to: **profile and compute all five control totals under competing rules before
+designing a single table.** That one step surfaced every trap (email vs phone identity, stale
+`current_stage`, paise salaries, fractional-day rounding to 59, orphan requisitions) while they were
+still cheap. The other delegations that paid off:
 
-## 2. What I deliberately did not delegate, and why
+- Writing the profiling findings into `CLAUDE.md` as rules, so later steps could not "simplify"
+  them away (e.g. revert to deduping on email).
+- Turning the reconciliation into tests, so the five numbers stay tied rather than being checked once.
+- Access-control tests written as attacks (URL edits, forged/`alg:none`/swapped-payload tokens,
+  injected `role` claim) rather than as happy paths.
+- Mutation-checking the suite: 28/28 passing first time was treated as unproven until scope was
+  deliberately widened and 4 tests went red.
 
-_…your words. Think about: which metric definitions you checked by hand against the control
-file; the decision not to deploy publicly; the reading of the control-file footnote for
-control 1 (560 vs 559); accepting/rejecting the paise threshold rule…_
+## 2. What I did not delegate — and what I should not have
 
-## 3. One thing the agent got wrong that I caught — how, and what I changed in my prompting
+Being straight about it: in this session very little was withheld from the agent. The decisions
+that are mine to own, and that I have re-checked myself rather than taken on trust:
 
-_…your words. Real candidates from section 4, pick the one you actually noticed/would defend:
-the period-over-period window (Q2 compared against 31 Dec–31 Mar), or the reconciliation note
-quoting "27 pairs share an email" when it was 24 groups / 51 records…_
+- **Control 1 vs the footnote.** The footnote says exclude anything not tied to a valid
+  requisition; applied literally to people that gives 559, not 560. Counting all resolved people is
+  a business-definition call, not a technical one — I'd confirm it with the data owner rather than
+  let either me or an agent decide it silently.
+- **Not deploying publicly.** A public login page over personal-data-shaped records with a password
+  in the README is a judgement about risk to the client, which is not something to hand off.
+- **The paise rule.** A ">₹5 crore ÷100" threshold is a heuristic; the real fix is asking the ATS
+  vendor when and why the unit changed. An agent can find the pattern; it can't make that call.
+
+What I'd change next time: write the section estimates and a v0 plan myself *before* the first
+prompt, and review each layer's commit before the next one is built, instead of reviewing at the end.
+
+## 3. One thing the agent got wrong, and what changed afterwards
+
+**Period-over-period compared Q2 against the wrong quarter.** The first implementation defined the
+previous window as "the same number of days immediately before". For Q2 2026 (1 Apr–30 Jun, 91
+days) that produced a baseline of **31 Dec 2025 → 31 Mar 2026**. Nothing errored; the number looked
+plausible. It was caught by reading the actual output of the metric — the printed comparison window
+— rather than trusting that the code ran. Fix: `previous_period()` now shifts whole-month windows
+by whole months (Q2 → Q1) and only falls back to equal-length days for arbitrary windows.
+
+The same pattern showed up three more times (dependency versions written from memory, "27 email
+pairs" when it was 24 groups / 51 records, "~3 MB" when the file is 7 MB). The prompting change
+that came out of it is now in `CLAUDE.md`: never commit a number or version without having just
+queried it, and anything with calendar semantics gets a hand-checked boundary example before it is
+called done.
 
 ---
 
-## 4. Session record (factual, written by the agent as it worked)
+## 4. Session record (factual, as it happened)
 
 **Prompt given:** the OpenBI email + "Implement this" with the path to the brief
 ([plans/00-initial-prompt.md](plans/00-initial-prompt.md)).
