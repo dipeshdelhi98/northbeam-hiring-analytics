@@ -16,7 +16,8 @@ This file is the standing brief for any coding agent working here. Read it befor
    stale denormalised column — it is kept in Gold only as `reported_current_stage` for auditing,
    and must never feed a metric.
 4. **Row-level security lives in `api/scope.py` and is applied by construction**: every request gets
-   a DuckDB connection whose `gold` tables are *temp views already filtered to the caller's scope*.
+   an in-memory DuckDB connection holding *copies of Gold tables already filtered to the caller's
+   scope*, with the warehouse detached.
    Metric SQL refers to bare table names (`fact_offer`, not `wh.gold.fact_offer`). A test enforces
    this. Scope is derived server-side from the user id in a signed token — never from request
    params and never from role claims in the token.
@@ -68,3 +69,8 @@ py -3.12 -m venv .venv && .venv/Scripts/pip install -r requirements.txt
 - Profile before you transform: run a query and look at the data before writing a cleaning rule.
 - Do not add dependencies without a reason written in the commit message.
 - Prefer SQL in DuckDB over pandas for transformations; pandas only for reading xlsx/json.
+- Never write a number, count or package version into a committed file without having just
+  queried it (`pip freeze`, a SQL count). Memory of earlier output is not a source.
+- Anything with calendar semantics (as-of, periods, day counts) gets a boundary example checked
+  by hand before it is called done.
+- A test suite that passes first time is unproven: break the code on purpose and watch it fail.
