@@ -1,0 +1,173 @@
+@import "tailwindcss";
+
+/* Theme tokens. Light is the default; dark is selected (its own steps), not an inversion.
+   The OS setting applies unless the viewer toggled a theme (data-theme on <html>). */
+:root {
+  color-scheme: light;
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #f1f2f5;
+  --surface-3: #e9ebef;
+  --border: #e3e5ea;
+  --grid: #eceef1;
+  --text: #0b0b0b;
+  --text-2: #52514e;
+  --text-3: #85847e;
+  --accent: #2a78d6;
+  --accent-soft: #e8f1fc;
+  --accent-ink: #ffffff;
+  --series-1: #2a78d6;
+  --series-1-wash: rgba(42, 120, 214, 0.1);
+  --good: #12804a;
+  --good-soft: #e5f4ec;
+  --bad: #c43a2f;
+  --bad-soft: #fbeceb;
+  --warn: #b26a00;
+  --warn-soft: #fdf3e2;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --stage-applied: #8a8984;
+  --stage-screen: #2a78d6;
+  --stage-interview: #6250d6;
+  --stage-offer: #eda100;
+  --stage-hired: #12804a;
+  --stage-rejected: #e34948;
+  --stage-withdrawn: #b5b4ad;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111110;
+    --surface: #1a1a19;
+    --surface-2: #222220;
+    --surface-3: #2a2a28;
+    --border: #2f2f2c;
+    --grid: #282826;
+    --text: #f0efec;
+    --text-2: #c3c2b7;
+    --text-3: #8f8e86;
+    --accent: #3987e5;
+    --accent-soft: #1b2a3d;
+    --accent-ink: #ffffff;
+    --series-1: #3987e5;
+    --series-1-wash: rgba(57, 135, 229, 0.12);
+    --good: #3fb67a;
+    --good-soft: #17291f;
+    --bad: #e66767;
+    --bad-soft: #321b1a;
+    --warn: #e0a030;
+    --warn-soft: #30261a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --stage-applied: #8f8e86;
+    --stage-screen: #3987e5;
+    --stage-interview: #9085e9;
+    --stage-offer: #c98500;
+    --stage-hired: #3fb67a;
+    --stage-rejected: #e66767;
+    --stage-withdrawn: #6b6a64;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111110;
+  --surface: #1a1a19;
+  --surface-2: #222220;
+  --surface-3: #2a2a28;
+  --border: #2f2f2c;
+  --grid: #282826;
+  --text: #f0efec;
+  --text-2: #c3c2b7;
+  --text-3: #8f8e86;
+  --accent: #3987e5;
+  --accent-soft: #1b2a3d;
+  --accent-ink: #ffffff;
+  --series-1: #3987e5;
+  --series-1-wash: rgba(57, 135, 229, 0.12);
+  --good: #3fb67a;
+  --good-soft: #17291f;
+  --bad: #e66767;
+  --bad-soft: #321b1a;
+  --warn: #e0a030;
+  --warn-soft: #30261a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --stage-applied: #8f8e86;
+  --stage-screen: #3987e5;
+  --stage-interview: #9085e9;
+  --stage-offer: #c98500;
+  --stage-hired: #3fb67a;
+  --stage-rejected: #e66767;
+  --stage-withdrawn: #6b6a64;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--border);
+  --color-ink: var(--text);
+  --color-ink-2: var(--text-2);
+  --color-ink-3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-feature-settings: "cv11", "ss01";
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.card {
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+/* recharts: keep axes and grid recessive */
+.recharts-cartesian-axis-tick-value {
+  fill: var(--text-3);
+  font-size: 12px;
+}
+.recharts-cartesian-grid line {
+  stroke: var(--grid);
+}
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
+}
+
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 0, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite linear;
+  border-radius: 8px;
+}
+
+@keyframes slide-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.drawer-enter {
+  animation: slide-in 180ms ease-out;
+}
