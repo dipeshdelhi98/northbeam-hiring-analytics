@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northbeam Hiring</title>
+<!--
+  Renders what the API returns. No metric arithmetic here: every number on screen is the
+  `display` string (or a raw count column) exactly as the API sent it.
+  The token lives in a JS variable only — not localStorage — so it dies with the tab.
+-->
+<style>
+  :root { --fg:#1d2433; --muted:#667085; --bg:#f7f8fa; --card:#fff; --line:#e4e7ec; --accent:#2f5bea; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, sans-serif; color:var(--fg); background:var(--bg); }
+  main { max-width:1100px; margin:0 auto; padding:24px 16px; }
+  h1 { font-size:20px; margin:0 0 4px; } h2 { font-size:15px; margin:28px 0 8px; }
+  .muted { color:var(--muted); }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-top:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px; }
+  .card .v { font-size:22px; font-weight:600; margin-top:6px; }
+  .card .d { font-size:12px; color:var(--muted); margin-top:6px; }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); }
+  th { font-size:12px; color:var(--muted); font-weight:600; }
+  td.n { text-align:right; font-variant-numeric:tabular-nums; }
+  .wrap { overflow-x:auto; }
+  a { color:var(--accent); cursor:pointer; }
+  form { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:20px; max-width:360px; }
+  input, button { font:inherit; padding:8px; width:100%; margin-top:8px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; cursor:pointer; }
+  .err { color:#b42318; margin-top:8px; }
+  header { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<main>
+  <section id="login">
+    <h1>Northbeam hiring analytics</h1>
+    <p class="muted">Sign in with a users.json email. Demo password is in the README.</p>
+    <form id="f">
+      <input id="email" type="email" placeholder="uday.varma@northbeam.example" required>
+      <input id="pw" type="password" placeholder="password" required>
+      <button>Sign in</button>
+      <div id="err" class="err"></div>
+    </form>
+  </section>
+  <section id="app" hidden>
+    <header><div><h1 id="who"></h1><div id="scope" class="muted"></div></div><a id="out">Sign out</a></header>
+    <div id="cards" class="cards"></div>
+    <h2>Stage conversion</h2><div class="wrap" id="conv"></div>
+    <h2>Pipeline by requisition</h2><div class="wrap" id="pipe"></div>
+    <h2 id="appsTitle" hidden></h2><div class="wrap" id="apps"></div>
+  </section>
+</main>
+<script>
+let token = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "–").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { "Content-Type": "application/json",
+    ...(token ? { Authorization: "Bearer " + token } : {}) } });
+  if (r.status === 401 && token) { signOut(); throw new Error("Session expired"); }
+  if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+  return r.json();
+}
+
+function table(cols, rows, numeric = []) {
+  return "<table><thead><tr>" + cols.map(c => `<th>${esc(c[1])}</th>`).join("") + "</tr></thead><tbody>" +
+    rows.map(r => "<tr>" + cols.map(c => `<td class="${numeric.includes(c[0]) ? "n" : ""}">${c[2] ? c[2](r) : esc(r[c[0]])}</td>`).join("") + "</tr>").join("") +
+    "</tbody></table>";
+}
+
+function card(label, display, desc) {
+  return `<div class="card"><div class="muted">${esc(label)}</div><div class="v">${esc(display)}</div><div class="d">${esc(desc)}</div></div>`;
+}
+
+async function load() {
+  const me = await api("/api/me");
+  $("who").textContent = `${me.name} · ${me.role.replace("_", " ")}`;
+  $("scope").textContent = me.role === "admin" ? "All requisitions" : `Requisitions: ${me.requisitions.join(", ") || "none"}`;
+  const d = await api("/api/dashboard");
+  const pop = d.period_over_period;
+  $("cards").innerHTML = d.cards.map(c => card(c.label, c.display, Object.entries(c.params).filter(([, v]) => v !== null).map(([k, v]) => `${k}: ${v}`).join(" · "))).join("")
+    + card(pop.label, pop.current.display, pop.display);
+  $("conv").innerHTML = table([["from_stage","From"],["to_stage","To"],["reached_from","Reached from"],["reached_to","Reached to"],["display","Conversion"]],
+    d.stage_conversion.value, ["reached_from","reached_to","display"]);
+  $("pipe").innerHTML = table([["req_id","Requisition",r => `<a data-req="${esc(r.req_id)}">${esc(r.req_id)}</a>`],["title","Title"],["department","Department"],["status","Status"],
+    ["applications","Applications"],["in_progress","In progress"],["at_offer","At offer"],["hired","Hired"]],
+    d.pipeline_by_requisition.value, ["applications","in_progress","at_offer","hired"]);
+}
+
+async function showApps(req) {
+  const rows = await api(`/api/requisitions/${encodeURIComponent(req)}/applications`);
+  $("appsTitle").hidden = false; $("appsTitle").textContent = `Applications — ${req}`;
+  $("apps").innerHTML = table([["application_id","Application"],["candidate_name","Candidate"],["applied_on","Applied"],["current_stage","Stage now"],["hired_on","Hired"]], rows);
+}
+
+function signOut() { token = null; $("app").hidden = true; $("login").hidden = false; $("apps").innerHTML = ""; $("appsTitle").hidden = true; }
+
+$("f").onsubmit = async e => {
+  e.preventDefault(); $("err").textContent = "";
+  try {
+    token = (await api("/api/login", { method: "POST", body: JSON.stringify({ email: $("email").value, password: $("pw").value }) })).access_token;
+    $("login").hidden = true; $("app").hidden = false; await load();
+  } catch (x) { token = null; $("err").textContent = x.message; }
+};
+$("pipe").onclick = e => { const r = e.target.dataset.req; if (r) showApps(r).catch(x => alert(x.message)); };
+$("out").onclick = signOut;
+</script>
+</body>
+</html>
